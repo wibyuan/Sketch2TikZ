@@ -28,6 +28,13 @@ VISION_PROMPT = (
     "LINES & ARROWS: For every connector, state: start point, end point, "
     "direction (→, ←, ↔), style (straight, curved, right-angle), "
     "and any labels on or near it.\n\n"
+    "TOPOLOGY & DEPTH: For every shape, explicitly state:\n"
+    "- OPEN vs CLOSED: Is the shape a fully enclosed polygon, or does it have gaps / "
+    "extending line segments that do NOT connect back to the start?\n"
+    "- 3D STRUCTURE: If the shape is a tetrahedron, cube, or other polyhedron, "
+    "count the visible faces, edges, and internal edges. Do NOT reduce it to a flat 2D triangle.\n"
+    "- EXTENDING SEGMENTS: Are there lines that continue beyond the main body "
+    "(e.g., diagonal legs sticking out of a quadrilateral)? State their direction and length.\n\n"
     "LAYOUT: Describe the overall spatial arrangement. Are elements in a row, "
     "column, grid, tree, or free-form? What is the relative spacing?"
 )
@@ -46,14 +53,36 @@ CODE_SYSTEM = (
     "description says N circles, your code must have N circles.\n"
     "8) Lines: straight is --, curved is .. controls .., right-angle is -| or |-.\n"
     "9) Match the description's layout exactly: row, column, grid, or tree.\n"
-    "10) No unused packages, no commented-out blocks.\n"
-    "EXAMPLE:\n"
+    "10) OPEN SHAPES: If the description says a shape has gaps or extending segments, "
+    "use \\draw to draw each edge individually. Do NOT use -- cycle to force closure.\n"
+    "11) EXTENDING SEGMENTS: If the description mentions lines that extend beyond the main body, "
+    "make those segments at least as long as the main shape itself so the open topology is visually obvious. "
+    "Do NOT draw tiny stub lines.\n"
+    "12) No unused packages, no commented-out blocks.\n"
+    "EXAMPLE — simple node + arrow:\n"
     "\\documentclass[tikz, border=2pt]{standalone}\n"
     "\\begin{document}\n"
     "\\begin{tikzpicture}\n"
     "  \\node[draw, circle] (A) at (0,0) {$x_1$};\n"
     "  \\node[draw, rectangle] (B) at (2,1) {$\\sum_{i=1}^{n}$};\n"
     "  \\draw[->, thick] (A) -- (B);\n"
+    "\\end{tikzpicture}\n"
+    "\\end{document}\n"
+    "EXAMPLE — open quadrilateral with extending diagonal legs:\n"
+    "\\documentclass[tikz, border=2pt]{standalone}\n"
+    "\\begin{document}\n"
+    "\\begin{tikzpicture}\n"
+    "  \\coordinate (TL) at (0,2);\n"
+    "  \\coordinate (TR) at (2,2);\n"
+    "  \\coordinate (BL) at (0,0);\n"
+    "  \\coordinate (BR) at (2,0);\n"
+    "  \\draw[thick] (TL) -- (BL);          % left vertical\n"
+    "  \\draw[dashed] (TL) -- (TR);         % top dashed\n"
+    "  \\draw[thick] (TR) -- (BR);          % right vertical\n"
+    "  \\draw[thick] (TL) ++(-1.5,1.5) -- (TL);  % upper-left extending leg (LONG)\n"
+    "  \\draw[thick] (BR) -- ++(1.5,-1.5);       % lower-right extending leg (LONG)\n"
+    "  \\fill (TL) circle (2pt);\n"
+    "  \\fill (TR) circle (2pt);\n"
     "\\end{tikzpicture}\n"
     "\\end{document}"
 )
@@ -200,8 +229,15 @@ def generate(image_path: str, index: int, output_dir: str = "output") -> SampleR
     # ── N2↔N3 Compile self-heal loop (max 3 total attempts) ──
     for attempt in range(3):
         compile_attempts = attempt + 1
-        raw = text_to_text(msgs, platforms=CODE_PLATFORMS,
-                           temperature=0.0, max_tokens=4096)
+        if attempt == 0:
+            # First attempt: let the code model see the original image too
+            code_prompt = CODE_SYSTEM + "\n\nGenerate TikZ code based on this description AND the original image:\n" + desc
+            raw = image_to_text(image_path, code_prompt,
+                                platforms=[p for p in CODE_PLATFORMS if p in VISION_MODELS],
+                                temperature=0.0, max_tokens=4096)
+        else:
+            raw = text_to_text(msgs, platforms=CODE_PLATFORMS,
+                               temperature=0.0, max_tokens=4096)
         tikz = _clean(raw)
         tikz = _fix(tikz)
         with open(tex_path, "w", encoding="utf-8") as f:
