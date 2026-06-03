@@ -11,42 +11,43 @@ load_dotenv(override=True)
 from train.llm_caller import image_to_text, text_to_text, _create
 from train.llm_caller import CODE_MODELS, VISION_MODELS, VISION_PLATFORMS, CODE_PLATFORMS
 from train.contract import SampleResult
-from train.prompts import load_prompts
 
 XELATEX = os.getenv("XELATEX_PATH", "xelatex")
 
-# ── Prompts (loaded from train/prompts/ by difficulty) ──
-_VISION_PROMPT_CACHE = {}
-_CODE_SYSTEM_CACHE = {}
+# ── Prompts ──────────────────────────────────────────
+VISION_PROMPT = (
+    "Describe all geometric shapes, text labels, arrows, colors, and layout "
+    "in this diagram in detail. Include relative positions, sizes, and "
+    "connections. Output a structured description suitable for generating TikZ."
+)
 
-def get_vision_prompt(difficulty: str = "easy") -> str:
-    if difficulty not in _VISION_PROMPT_CACHE:
-        _VISION_PROMPT_CACHE[difficulty] = load_prompts(difficulty)["vision_prompt"]
-    return _VISION_PROMPT_CACHE[difficulty]
-
-def get_code_system(difficulty: str = "easy") -> str:
-    if difficulty not in _CODE_SYSTEM_CACHE:
-        _CODE_SYSTEM_CACHE[difficulty] = load_prompts(difficulty)["code_system"]
-    return _CODE_SYSTEM_CACHE[difficulty]
-
-# Backward-compatible defaults
-VISION_PROMPT = get_vision_prompt("easy")
-CODE_SYSTEM = get_code_system("easy")
+CODE_SYSTEM = (
+    "You are a TikZ LaTeX expert. Generate correct, compilable TikZ code.\n"
+    "RULES:\n"
+    "1) First line: \\documentclass[tikz, border=2pt]{standalone}\n"
+    "2) Output ONLY raw LaTeX. No markdown, no explanation.\n"
+    "3) No \\usepackage{inputenc}, \\usepackage{fontenc}, or [pdftex] driver.\n"
+    "4) No \\ensuremath in node styles.\n"
+    "5) All node text in valid LaTeX math ($...$ or \\(...\\)).\n"
+    "6) \\draw[->] for arrows, \\node[draw,circle] for circled nodes.\n"
+    "7) No unused packages, no commented-out blocks.\n"
+    "EXAMPLE:\n"
+    "\\documentclass[tikz, border=2pt]{standalone}\n"
+    "\\begin{document}\n"
+    "\\begin{tikzpicture}\n"
+    "  \\node[draw, circle] (A) at (0,0) {A};\n"
+    "  \\node[draw, circle] (B) at (2,1) {B};\n"
+    "  \\draw[->] (A) -- (B);\n"
+    "\\end{tikzpicture}\n"
+    "\\end{document}"
+)
 
 CRITIC_PROMPT = (
-    "Compare the two images. Score 1.0-5.0. Be brutally honest.\n"
-    "This is NOT a checklist of what elements exist.\n"
-    "It is about whether the two images LOOK THE SAME visually.\n"
-    "- 1.0: completely different, unrecognizable\n"
-    "- 2.0: recognizable attempt but major structural or shape differences\n"
-    "- 3.0: same type of diagram but significant layout/shape/color differences\n"
-    "- 4.0: very similar, only minor shape/size/position differences\n"
-    "- 5.0: near-identical, no discernible differences\n"
-    "CRITICAL: identical element count does NOT mean identical appearance.\n"
-    "If shapes differ in proportion, aspect ratio, or curvature, score <= 2.0.\n"
-    "If placement differs noticeably from reference, score <= 3.0.\n"
-    'Output ONLY JSON: {"score": <float>, "is_pass": <bool>, '
-    '"diagnosis": "<specific visual differences>"}'
+    "Compare these two images. Image 1 is the REFERENCE, Image 2 is the GENERATED output. "
+    "Output ONLY a JSON object:\n"
+    '{"score": <float 1.0-5.0>, "is_pass": <true/false>, '
+    '"diagnosis": "<specific: what shapes are wrong, missing, misplaced, wrong color/size>"}\n'
+    "is_pass = score >= 3.0. Be strict — if key elements are missing, score <= 1.0."
 )
 
 # ── Platform priority (imported from llm_caller) ──────
@@ -120,13 +121,18 @@ def _encode_img(path: str) -> str:
 
 
 def _internal_critic(original_path: str, pdf_path: str, output_dir: str) -> dict:
-    """Internal visual critic for feedback loop (not the sealed judge)."""
+    """Internal visual critic for feedback loop (not the sealed judge).
+
+    Tries all vision platforms in order with key rotation, falling back to the
+    next platform on failure, mirroring image_to_text's fallback behaviour.
+    """
     png_path = os.path.join(output_dir, "critic_internal.png")
     if not _pdf_to_png(pdf_path, png_path):
         return {"score": 0.0, "is_pass": False, "diagnosis": "PDF render failed"}
     b64_orig = _encode_img(original_path)
     b64_gen = _encode_img(png_path)
-    critic_msgs = [{"role": "user", "content": [
+
+    messages = [{"role": "user", "content": [
         {"type": "text", "text": "Image 1 (REFERENCE):"},
         {"type": "image_url", "image_url": {"url": b64_orig}},
         {"type": "text", "text": "Image 2 (GENERATED):"},
@@ -134,55 +140,54 @@ def _internal_critic(original_path: str, pdf_path: str, output_dir: str) -> dict
         {"type": "text", "text": CRITIC_PROMPT},
     ]}]
 
-    # Try vision platforms in order via fallback
-    raw = None
-    for p in VISION_PLATFORMS:
-        try:
-            raw = _create(p, VISION_MODELS[p], critic_msgs, temperature=0.0, max_tokens=300)
-            break
-        except Exception:
+    errors = []
+    for platform in VISION_PLATFORMS:
+        model = VISION_MODELS.get(platform)
+        if not model:
             continue
-    if raw is None:
-        return {"score": 0.0, "is_pass": False, "diagnosis": "All critic platforms failed"}
-    raw = raw.strip()
-    if raw.startswith("```"): raw = raw.split("\n", 1)[-1].replace("```", "").strip()
-    try:
-        j = json.loads(raw)
-        return {"score": float(j.get("score", 0)), "is_pass": bool(j.get("is_pass", False)),
-                "diagnosis": str(j.get("diagnosis", ""))}
-    except (json.JSONDecodeError, ValueError):
-        return {"score": 0.0, "is_pass": False, "diagnosis": f"Critic parse failed: {raw[:100]}"}
+        try:
+            raw = _create(platform, model, messages,
+                          temperature=0.0, max_tokens=300)
+            raw = raw.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[-1].replace("```", "").strip()
+            try:
+                j = json.loads(raw)
+                return {"score": float(j.get("score", 0)),
+                        "is_pass": bool(j.get("is_pass", False)),
+                        "diagnosis": str(j.get("diagnosis", ""))}
+            except (json.JSONDecodeError, ValueError):
+                return {"score": 0.0, "is_pass": False,
+                        "diagnosis": f"Critic parse failed: {raw[:100]}"}
+        except Exception as e:
+            msg = f"[{platform}] {type(e).__name__}: {e}"
+            errors.append(msg)
+            try:
+                print(f"  [WARN] critic failed on {platform}: "
+                      f"{type(e).__name__}: {str(e)[:200]}")
+            except Exception:
+                pass
+            continue
+
+    return {"score": 0.0, "is_pass": False,
+            "diagnosis": f"All vision platforms failed: {'; '.join(errors[-3:])}"}
 
 
 # ── Main pipeline ────────────────────────────────────
-def generate(image_path: str, index: int, output_dir: str = "output",
-             difficulty: str = "easy") -> SampleResult:
-    """Generate TikZ from an image.
-    
-    Args:
-        image_path: Path to input PNG
-        index: Sample index
-        output_dir: Where to save generated files
-        difficulty: Which prompt set to use ("easy", "medium", "difficult", etc.)
-    """
+def generate(image_path: str, index: int, output_dir: str = "output") -> SampleResult:
     t_start = time.time()
     os.makedirs(output_dir, exist_ok=True)
 
-    vision_prompt = get_vision_prompt(difficulty)
-    code_system = get_code_system(difficulty)
-
     # N1: Vision description
-    desc = image_to_text(image_path, vision_prompt,
-                         platforms=VISION_PLATFORMS, temperature=0.0, max_tokens=1024)
+    desc = image_to_text(image_path, VISION_PROMPT,
+                         platforms=VISION_PLATFORMS, temperature=0.1, max_tokens=1024)
     vision_time = round(time.time() - t_start, 1)
 
-    base_name = os.path.splitext(os.path.basename(image_path))[0]
-    tag = f"{base_name}_{index:04d}"
-    tex_path = os.path.join(output_dir, f"gen_{tag}.tex")
-    pdf_path = os.path.join(output_dir, f"gen_{tag}.pdf")
+    tex_path = os.path.join(output_dir, f"gen_{index:04d}.tex")
+    pdf_path = os.path.join(output_dir, f"gen_{index:04d}.pdf")
 
     msgs = [
-        {"role": "system", "content": code_system},
+        {"role": "system", "content": CODE_SYSTEM},
         {"role": "user", "content": f"Generate TikZ code for:\n{desc}"},
     ]
 
@@ -198,7 +203,7 @@ def generate(image_path: str, index: int, output_dir: str = "output",
     for attempt in range(3):
         compile_attempts = attempt + 1
         raw = text_to_text(msgs, platforms=CODE_PLATFORMS,
-                           temperature=0.0, max_tokens=4096)
+                           temperature=0.05 if attempt == 0 else 0.3, max_tokens=4096)
         tikz = _clean(raw)
         tikz = _fix(tikz)
         with open(tex_path, "w", encoding="utf-8") as f:
@@ -226,7 +231,7 @@ def generate(image_path: str, index: int, output_dir: str = "output",
                                     f"{diagnosis}\n\nMake ONLY minimal targeted fixes to address these "
                                     f"specific issues. Do NOT change anything that is already correct."})
             raw2 = text_to_text(msgs, platforms=CODE_PLATFORMS,
-                                temperature=0.0, max_tokens=4096)
+                                temperature=0.1, max_tokens=4096)
             tikz2 = _clean(raw2)
             tikz2 = _fix(tikz2)
             with open(tex_path, "w", encoding="utf-8") as f:
