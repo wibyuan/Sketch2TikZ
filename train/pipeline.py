@@ -16,27 +16,9 @@ XELATEX = os.getenv("XELATEX_PATH", "xelatex")
 
 # ── Prompts ──────────────────────────────────────────
 VISION_PROMPT = (
-    "Describe this diagram with maximum precision for TikZ code generation.\n\n"
-    "FORMULAS: Every mathematical expression MUST be written in LaTeX notation "
-    "(e.g. $\\sum_{i=1}^{n} x_i$, $\\frac{a}{b}$, $\\alpha$, $\\rightarrow$). "
-    "Never describe formulas in plain English — output the exact LaTeX.\n\n"
-    "SHAPES: Count and name every shape precisely. For each shape, state:\n"
-    "- Type: rectangle, circle, ellipse, straight line, curved arrow, dashed line, etc.\n"
-    "- Position: exact relative location (center, top-left, bottom-right, between X and Y)\n"
-    "- Size: relative scale (large, small, same width as X, half the height of Y)\n"
-    "- Style: solid, dashed, dotted, thick, thin, color, filled/hollow\n\n"
-    "LINES & ARROWS: For every connector, state: start point, end point, "
-    "direction (→, ←, ↔), style (straight, curved, right-angle), "
-    "and any labels on or near it.\n\n"
-    "TOPOLOGY & DEPTH: For every shape, explicitly state:\n"
-    "- OPEN vs CLOSED: Is the shape a fully enclosed polygon, or does it have gaps / "
-    "extending line segments that do NOT connect back to the start?\n"
-    "- 3D STRUCTURE: If the shape is a tetrahedron, cube, or other polyhedron, "
-    "count the visible faces, edges, and internal edges. Do NOT reduce it to a flat 2D triangle.\n"
-    "- EXTENDING SEGMENTS: Are there lines that continue beyond the main body "
-    "(e.g., diagonal legs sticking out of a quadrilateral)? State their direction and length.\n\n"
-    "LAYOUT: Describe the overall spatial arrangement. Are elements in a row, "
-    "column, grid, tree, or free-form? What is the relative spacing?"
+    "Describe all geometric shapes, text labels, arrows, colors, and layout "
+    "in this diagram in detail. Include relative positions, sizes, and "
+    "connections. Output a structured description suitable for generating TikZ."
 )
 
 CODE_SYSTEM = (
@@ -46,43 +28,16 @@ CODE_SYSTEM = (
     "2) Output ONLY raw LaTeX. No markdown, no explanation.\n"
     "3) No \\usepackage{inputenc}, \\usepackage{fontenc}, or [pdftex] driver.\n"
     "4) No \\ensuremath in node styles.\n"
-    "5) Every formula in the description MUST appear verbatim in LaTeX math mode.\n"
-    "6) \\draw[->] for arrows, \\node[draw,circle] for circled nodes, "
-    "\\node[draw,rectangle] for boxes.\n"
-    "7) Every shape in the description MUST be rendered. Count them: if the "
-    "description says N circles, your code must have N circles.\n"
-    "8) Lines: straight is --, curved is .. controls .., right-angle is -| or |-.\n"
-    "9) Match the description's layout exactly: row, column, grid, or tree.\n"
-    "10) OPEN SHAPES: If the description says a shape has gaps or extending segments, "
-    "use \\draw to draw each edge individually. Do NOT use -- cycle to force closure.\n"
-    "11) EXTENDING SEGMENTS: If the description mentions lines that extend beyond the main body, "
-    "make those segments at least as long as the main shape itself so the open topology is visually obvious. "
-    "Do NOT draw tiny stub lines.\n"
-    "12) No unused packages, no commented-out blocks.\n"
-    "EXAMPLE — simple node + arrow:\n"
+    "5) All node text in valid LaTeX math ($...$ or \\(...\\)).\n"
+    "6) \\draw[->] for arrows, \\node[draw,circle] for circled nodes.\n"
+    "7) No unused packages, no commented-out blocks.\n"
+    "EXAMPLE:\n"
     "\\documentclass[tikz, border=2pt]{standalone}\n"
     "\\begin{document}\n"
     "\\begin{tikzpicture}\n"
-    "  \\node[draw, circle] (A) at (0,0) {$x_1$};\n"
-    "  \\node[draw, rectangle] (B) at (2,1) {$\\sum_{i=1}^{n}$};\n"
-    "  \\draw[->, thick] (A) -- (B);\n"
-    "\\end{tikzpicture}\n"
-    "\\end{document}\n"
-    "EXAMPLE — open quadrilateral with extending diagonal legs:\n"
-    "\\documentclass[tikz, border=2pt]{standalone}\n"
-    "\\begin{document}\n"
-    "\\begin{tikzpicture}\n"
-    "  \\coordinate (TL) at (0,2);\n"
-    "  \\coordinate (TR) at (2,2);\n"
-    "  \\coordinate (BL) at (0,0);\n"
-    "  \\coordinate (BR) at (2,0);\n"
-    "  \\draw[thick] (TL) -- (BL);          % left vertical\n"
-    "  \\draw[dashed] (TL) -- (TR);         % top dashed\n"
-    "  \\draw[thick] (TR) -- (BR);          % right vertical\n"
-    "  \\draw[thick] (TL) ++(-1.5,1.5) -- (TL);  % upper-left extending leg (LONG)\n"
-    "  \\draw[thick] (BR) -- ++(1.5,-1.5);       % lower-right extending leg (LONG)\n"
-    "  \\fill (TL) circle (2pt);\n"
-    "  \\fill (TR) circle (2pt);\n"
+    "  \\node[draw, circle] (A) at (0,0) {A};\n"
+    "  \\node[draw, circle] (B) at (2,1) {B};\n"
+    "  \\draw[->] (A) -- (B);\n"
     "\\end{tikzpicture}\n"
     "\\end{document}"
 )
@@ -166,13 +121,18 @@ def _encode_img(path: str) -> str:
 
 
 def _internal_critic(original_path: str, pdf_path: str, output_dir: str) -> dict:
-    """Internal visual critic for feedback loop (not the sealed judge)."""
+    """Internal visual critic for feedback loop (not the sealed judge).
+
+    Tries all vision platforms in order with key rotation, falling back to the
+    next platform on failure, mirroring image_to_text's fallback behaviour.
+    """
     png_path = os.path.join(output_dir, "critic_internal.png")
     if not _pdf_to_png(pdf_path, png_path):
         return {"score": 0.0, "is_pass": False, "diagnosis": "PDF render failed"}
     b64_orig = _encode_img(original_path)
     b64_gen = _encode_img(png_path)
-    critic_msgs = [{"role": "user", "content": [
+
+    messages = [{"role": "user", "content": [
         {"type": "text", "text": "Image 1 (REFERENCE):"},
         {"type": "image_url", "image_url": {"url": b64_orig}},
         {"type": "text", "text": "Image 2 (GENERATED):"},
@@ -180,24 +140,37 @@ def _internal_critic(original_path: str, pdf_path: str, output_dir: str) -> dict
         {"type": "text", "text": CRITIC_PROMPT},
     ]}]
 
-    # Try vision platforms in order via fallback
-    raw = None
-    for p in VISION_PLATFORMS:
-        try:
-            raw = _create(p, VISION_MODELS[p], critic_msgs, temperature=0.0, max_tokens=300)
-            break
-        except Exception:
+    errors = []
+    for platform in VISION_PLATFORMS:
+        model = VISION_MODELS.get(platform)
+        if not model:
             continue
-    if raw is None:
-        return {"score": 0.0, "is_pass": False, "diagnosis": "All critic platforms failed"}
-    raw = raw.strip()
-    if raw.startswith("```"): raw = raw.split("\n", 1)[-1].replace("```", "").strip()
-    try:
-        j = json.loads(raw)
-        return {"score": float(j.get("score", 0)), "is_pass": bool(j.get("is_pass", False)),
-                "diagnosis": str(j.get("diagnosis", ""))}
-    except (json.JSONDecodeError, ValueError):
-        return {"score": 0.0, "is_pass": False, "diagnosis": f"Critic parse failed: {raw[:100]}"}
+        try:
+            raw = _create(platform, model, messages,
+                          temperature=0.0, max_tokens=300)
+            raw = raw.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[-1].replace("```", "").strip()
+            try:
+                j = json.loads(raw)
+                return {"score": float(j.get("score", 0)),
+                        "is_pass": bool(j.get("is_pass", False)),
+                        "diagnosis": str(j.get("diagnosis", ""))}
+            except (json.JSONDecodeError, ValueError):
+                return {"score": 0.0, "is_pass": False,
+                        "diagnosis": f"Critic parse failed: {raw[:100]}"}
+        except Exception as e:
+            msg = f"[{platform}] {type(e).__name__}: {e}"
+            errors.append(msg)
+            try:
+                print(f"  [WARN] critic failed on {platform}: "
+                      f"{type(e).__name__}: {str(e)[:200]}")
+            except Exception:
+                pass
+            continue
+
+    return {"score": 0.0, "is_pass": False,
+            "diagnosis": f"All vision platforms failed: {'; '.join(errors[-3:])}"}
 
 
 # ── Main pipeline ────────────────────────────────────
@@ -207,7 +180,7 @@ def generate(image_path: str, index: int, output_dir: str = "output") -> SampleR
 
     # N1: Vision description
     desc = image_to_text(image_path, VISION_PROMPT,
-                         platforms=VISION_PLATFORMS, temperature=0.0, max_tokens=1024)
+                         platforms=VISION_PLATFORMS, temperature=0.1, max_tokens=1024)
     vision_time = round(time.time() - t_start, 1)
 
     tex_path = os.path.join(output_dir, f"gen_{index:04d}.tex")
@@ -229,15 +202,8 @@ def generate(image_path: str, index: int, output_dir: str = "output") -> SampleR
     # ── N2↔N3 Compile self-heal loop (max 3 total attempts) ──
     for attempt in range(3):
         compile_attempts = attempt + 1
-        if attempt == 0:
-            # First attempt: let the code model see the original image too
-            code_prompt = CODE_SYSTEM + "\n\nGenerate TikZ code based on this description AND the original image:\n" + desc
-            raw = image_to_text(image_path, code_prompt,
-                                platforms=[p for p in CODE_PLATFORMS if p in VISION_MODELS],
-                                temperature=0.0, max_tokens=4096)
-        else:
-            raw = text_to_text(msgs, platforms=CODE_PLATFORMS,
-                               temperature=0.0, max_tokens=4096)
+        raw = text_to_text(msgs, platforms=CODE_PLATFORMS,
+                           temperature=0.05 if attempt == 0 else 0.3, max_tokens=4096)
         tikz = _clean(raw)
         tikz = _fix(tikz)
         with open(tex_path, "w", encoding="utf-8") as f:
@@ -265,7 +231,7 @@ def generate(image_path: str, index: int, output_dir: str = "output") -> SampleR
                                     f"{diagnosis}\n\nMake ONLY minimal targeted fixes to address these "
                                     f"specific issues. Do NOT change anything that is already correct."})
             raw2 = text_to_text(msgs, platforms=CODE_PLATFORMS,
-                                temperature=0.0, max_tokens=4096)
+                                temperature=0.1, max_tokens=4096)
             tikz2 = _clean(raw2)
             tikz2 = _fix(tikz2)
             with open(tex_path, "w", encoding="utf-8") as f:
