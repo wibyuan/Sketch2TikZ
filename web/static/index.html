@@ -127,17 +127,34 @@
                     </div>
                 </div>
 
-                <!-- Action bar -->
-                <div class="regenerate-bar">
-                    <div class="action-group">
-                        <button id="btn-compile-only" class="btn-secondary">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-                            直接编译修改后的代码
-                        </button>
-                        <button id="btn-regenerate" class="btn-secondary">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-                            用新描述重新生成
-                        </button>
+                <!-- Comparison Card: choose which version to keep -->
+                <div id="comparison-card" class="comparison-card hidden">
+                    <div class="comparison-header">
+                        <h3>选择保留的结果</h3>
+                        <p>选择更满意的一个版本，后续优化将基于该版本继续</p>
+                    </div>
+                    <div class="comparison-grid">
+                        <div class="comparison-item" id="comp-item-a">
+                            <div class="comp-badge">版本 A（上一轮）</div>
+                            <div class="comp-preview">
+                                <img id="comp-img-a" src="" alt="version A">
+                            </div>
+                            <div class="comp-meta">
+                                <span class="comp-score" id="comp-score-a">—</span>
+                            </div>
+                            <button id="btn-select-a" class="btn-secondary btn-select">保留此版本</button>
+                        </div>
+                        <div class="comparison-divider">VS</div>
+                        <div class="comparison-item" id="comp-item-b">
+                            <div class="comp-badge badge-current">版本 B（当前生成）</div>
+                            <div class="comp-preview">
+                                <img id="comp-img-b" src="" alt="version B">
+                            </div>
+                            <div class="comp-meta">
+                                <span class="comp-score" id="comp-score-b">—</span>
+                            </div>
+                            <button id="btn-select-b" class="btn-primary btn-select">保留此版本</button>
+                        </div>
                     </div>
                 </div>
             </div>

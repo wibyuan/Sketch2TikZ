@@ -91,7 +91,28 @@ conda install -c conda-forge -y ghostscript
 
 API keys: copy `.env.example` to `.env`, fill in at least one platform.
 
-## Usage
+## Web UI
+
+Interactive generation with visual comparison and iterative refinement.
+
+```bash
+python -m web.server
+```
+
+Open http://127.0.0.1:8000 in your browser.
+
+### Workflow
+
+1. **Upload** a hand-drawn sketch (PNG/JPG/WEBP)
+2. **(Optional)** Enter a custom description in the left panel
+3. Click **「开始生成」** — the pipeline runs: Vision → CodeGen → Compile → Critic
+4. To refine: modify the description, then click **「重新生成」**
+5. **Compare** the two outputs side-by-side and pick the better one
+6. Repeat step 4–5 until satisfied
+
+The system automatically reuses your selected version as the baseline for the next refinement. Switching to a new image resets the state and starts fresh.
+
+## Usage (CLI)
 
 ```bash
 # Benchmark on sealed test set
