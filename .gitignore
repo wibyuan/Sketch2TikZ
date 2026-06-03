@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.zip
 output/
+output_*/
 *.log
 *.aux
 *.bib
@@ -13,3 +14,11 @@ Thumbs.db
 _tmp_*
 .claude/
 iteration_logs/
+vsrc/
+web/uploads/
+web/uploads/*
+benchmark_results*.json
+content_category_v2/
+plots/
+output.txt
+results.md
