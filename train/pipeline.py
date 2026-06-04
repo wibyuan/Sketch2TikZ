@@ -88,11 +88,20 @@ CODE_SYSTEM = (
 )
 
 CRITIC_PROMPT = (
-    "Compare these two images. Image 1 is the REFERENCE, Image 2 is the GENERATED output. "
-    "Output ONLY a JSON object:\n"
+    "You are evaluating how well a generated figure matches a reference image. "
+    "Image 1 is the REFERENCE (ground truth). Image 2 is the GENERATED output. "
+    "Compare them on: shapes, line styles, colors, topology, connections, "
+    "relative positions, spatial layout, and aspect ratio. "
+    "CRITICAL: If shapes are severely stretched, squashed, or distorted vs "
+    "the reference, assign score = 0.0. "
+    "If key elements from the reference are entirely missing, score <= 1.0. "
+    "If all elements present but positions/colors differ, score 1.0-2.0. "
+    "If minor differences only, score 2.0-5.0. "
+    "If there are any differences that are easily discernible to the naked eye—"
+    "such as the absence of visually prominent lines—the score should not exceed 3.0. "
+    "Output ONLY a JSON object, no markdown, no explanation:\n"
     '{"score": <float 1.0-5.0>, "is_pass": <true/false>, '
-    '"diagnosis": "<specific: what shapes are wrong, missing, misplaced, wrong color/size>"}\n'
-    "is_pass = score >= 3.0. Be strict — if key elements are missing, score <= 1.0."
+    '"diagnosis": "<one sentence describing the main difference>"}'
 )
 
 # ── Platform priority (imported from llm_caller) ──────

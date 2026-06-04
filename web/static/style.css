@@ -477,3 +477,96 @@ body {
 
 /* Utilities */
 .hidden { display: none !important; }
+
+/* Comparison Card */
+.comparison-card {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    margin-top: 16px;
+}
+.comparison-header {
+    margin-bottom: 16px;
+}
+.comparison-header h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-0);
+    margin-bottom: 4px;
+}
+.comparison-header p {
+    font-size: 13px;
+    color: var(--text-2);
+}
+.comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 16px;
+    align-items: center;
+}
+.comparison-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+}
+.comparison-item.active {
+    border-color: var(--accent);
+    background: rgba(59, 130, 246, 0.05);
+}
+.comp-badge {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-2);
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--bg-1);
+}
+.comp-badge.badge-current {
+    color: var(--accent);
+    background: rgba(59, 130, 246, 0.1);
+}
+.comp-preview {
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: var(--bg-1);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.comp-preview img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+.comp-meta {
+    font-size: 13px;
+    color: var(--text-1);
+    font-weight: 500;
+}
+.comparison-divider {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-2);
+    padding: 0 4px;
+}
+.btn-select {
+    width: 100%;
+    justify-content: center;
+}
+@media (max-width: 640px) {
+    .comparison-grid {
+        grid-template-columns: 1fr;
+    }
+    .comparison-divider {
+        transform: rotate(90deg);
+        padding: 4px 0;
+    }
+}

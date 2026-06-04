@@ -96,6 +96,46 @@ async def api_task_stream(task_id: str):
     )
 
 
+@router.post("/api/refine")
+async def api_refine(
+    prev_task_id: str = Form(...),
+    custom_prompt: str = Form(...),
+):
+    """Refine a previous generation with user feedback + visual comparison.
+    Reuses the original image from prev_task to ensure consistency."""
+    prev_dir = os.path.join(UPLOADS_DIR, prev_task_id)
+    prev_tex = os.path.join(prev_dir, "output.tex")
+    prev_pdf = os.path.join(prev_dir, "output.pdf")
+    prev_img = os.path.join(prev_dir, "input.png")
+    if not os.path.exists(prev_tex) or not os.path.exists(prev_pdf):
+        raise HTTPException(404, "Previous task result not found")
+    if not os.path.exists(prev_img):
+        raise HTTPException(404, "Previous task input image not found")
+
+    task = manager.create_task(image_path="", custom_prompt=custom_prompt)
+    image_path = os.path.join(task.output_dir, "input.png")
+    shutil.copy2(prev_img, image_path)
+    task.image_path = image_path
+
+    def _callback(stage, status, message, data=None):
+        task.emit(stage, status, message, data)
+
+    from web.pipeline_web import refine_with_callbacks
+    manager.submit(
+        task,
+        refine_with_callbacks,
+        image_path=image_path,
+        prev_tex_path=prev_tex,
+        prev_pdf_path=prev_pdf,
+        custom_prompt=custom_prompt,
+        output_dir=task.output_dir,
+        callbacks=_callback,
+        task_id=task.task_id,
+    )
+
+    return {"task_id": task.task_id, "status": "queued"}
+
+
 @router.get("/api/history")
 async def api_history():
     return manager.list_history()

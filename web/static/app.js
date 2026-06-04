@@ -4,8 +4,15 @@
 
 // ── State ───────────────────────────────────────
 let currentTaskId = null;
+let selectedTaskId = null;   // 用户选择保留的结果版本（refine 的基线）
 let currentImageFile = null;
+let lastGenFileKey = null;   // 记录上次成功生成时用的图片标识
 let abortController = null;
+const taskResultCache = new Map();  // task_id -> result 缓存
+
+function getFileKey(file) {
+    return file ? `${file.name}-${file.size}-${file.lastModified}` : null;
+}
 
 // ── DOM refs ────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -39,8 +46,13 @@ const btnDlPdf = $('btn-dl-pdf');
 const btnDlPng = $('btn-dl-png');
 const btnCopyCode = $('btn-copy-code');
 const btnDlTex = $('btn-dl-tex');
-const btnRegenerate = $('btn-regenerate');
-const btnCompileOnly = $('btn-compile-only');
+const comparisonCard = $('comparison-card');
+const compImgA = $('comp-img-a');
+const compImgB = $('comp-img-b');
+const compScoreA = $('comp-score-a');
+const compScoreB = $('comp-score-b');
+const btnSelectA = $('btn-select-a');
+const btnSelectB = $('btn-select-b');
 
 const btnHistory = $('btn-history');
 const historyPanel = $('history-panel');
@@ -82,10 +94,6 @@ function init() {
     btnDlTex.addEventListener('click', () => downloadFile('tex'));
     btnCopyCode.addEventListener('click', copyCode);
 
-    // Regenerate & compile
-    btnRegenerate.addEventListener('click', startRegeneration);
-    btnCompileOnly.addEventListener('click', compileOnly);
-
     // History panel
     btnHistory.addEventListener('click', () => historyPanel.classList.remove('hidden'));
     btnCloseHistory.addEventListener('click', () => historyPanel.classList.add('hidden'));
@@ -105,11 +113,15 @@ function handleFileSelect(file) {
         return;
     }
     currentImageFile = file;
+    selectedTaskId = null;          // 换了图，重置选择状态
+    lastGenFileKey = null;
+    comparisonCard.classList.add('hidden');
     const url = URL.createObjectURL(file);
     previewImg.src = url;
     uploadPreview.classList.remove('hidden');
     uploadZone.querySelector('.upload-placeholder').classList.add('hidden');
     btnGenerate.disabled = false;
+    updateButtonLabel();
 }
 
 function clearFile() {
@@ -119,40 +131,75 @@ function clearFile() {
     uploadPreview.classList.add('hidden');
     uploadZone.querySelector('.upload-placeholder').classList.remove('hidden');
     btnGenerate.disabled = true;
+    updateButtonLabel();
 }
 
-// ── Generation ──────────────────────────────────
+// ── Generation / Refine ─────────────────────────
 async function startGeneration() {
     if (!currentImageFile) return;
 
-    // UI: switch to generating state
+    const promptVal = customPrompt.value.trim();
+    const currentKey = getFileKey(currentImageFile);
+    const canRefine = selectedTaskId && currentKey === lastGenFileKey;
+
+    if (canRefine && !promptVal) {
+        showToast('请在左侧「自定义描述」中输入修改意见');
+        customPrompt.focus();
+        return;
+    }
+
     setGenerating(true);
     resetProgress();
     progressArea.classList.remove('hidden');
     emptyState.classList.add('hidden');
     resultView.classList.add('hidden');
     scoreBar.classList.add('hidden');
+    comparisonCard.classList.add('hidden');
 
-    const form = new FormData();
-    form.append('file', currentImageFile);
-    const promptVal = customPrompt.value.trim();
-    if (promptVal) form.append('custom_prompt', promptVal);
-
-    try {
-        const res = await fetch('/api/generate', { method: 'POST', body: form });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${res.status}`);
+    if (canRefine) {
+        const form = new FormData();
+        form.append('prev_task_id', selectedTaskId);
+        form.append('custom_prompt', promptVal);
+        try {
+            const res = await fetch('/api/refine', { method: 'POST', body: form });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `HTTP ${res.status}`);
+            }
+            const { task_id } = await res.json();
+            currentTaskId = task_id;
+            connectSSE(task_id);
+        } catch (e) {
+            showToast('重新生成失败: ' + e.message);
+            setGenerating(false);
+            progressLabel.textContent = '重新生成失败';
+            progressPercent.textContent = '!';
+            progressFill.style.width = '100%';
+            progressFill.style.background = 'var(--error)';
         }
-        const { task_id } = await res.json();
-        currentTaskId = task_id;
-        connectSSE(task_id);
-    } catch (e) {
-        showToast('生成失败: ' + e.message);
-        setGenerating(false);
-        progressLabel.textContent = '生成失败';
-        progressFill.style.width = '100%';
-        progressFill.style.background = 'var(--error)';
+    } else {
+        const form = new FormData();
+        form.append('file', currentImageFile);
+        if (promptVal) form.append('custom_prompt', promptVal);
+        try {
+            const res = await fetch('/api/generate', { method: 'POST', body: form });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `HTTP ${res.status}`);
+            }
+            const { task_id } = await res.json();
+            currentTaskId = task_id;
+            selectedTaskId = task_id;
+            lastGenFileKey = getFileKey(currentImageFile);
+            connectSSE(task_id);
+        } catch (e) {
+            showToast('生成失败: ' + e.message);
+            setGenerating(false);
+            progressLabel.textContent = '生成失败';
+            progressPercent.textContent = '!';
+            progressFill.style.width = '100%';
+            progressFill.style.background = 'var(--error)';
+        }
     }
 }
 
@@ -222,12 +269,28 @@ function resetProgress() {
 
 function setGenerating(isGen) {
     btnGenerate.disabled = isGen || !currentImageFile;
-    btnText.textContent = isGen ? '生成中...' : '开始生成';
+    btnText.textContent = isGen ? '生成中...' : getGenerateLabel();
     btnSpin.classList.toggle('hidden', !isGen);
+}
+
+function getGenerateLabel() {
+    const currentKey = getFileKey(currentImageFile);
+    const canRefine = selectedTaskId && currentKey === lastGenFileKey;
+    return canRefine ? '重新生成' : '开始生成';
+}
+
+function updateButtonLabel() {
+    if (!btnSpin.classList.contains('hidden')) return; // 生成中不更新
+    btnText.textContent = getGenerateLabel();
 }
 
 // ── Result Display ──────────────────────────────
 function showResult(result) {
+    // Cache result for comparison
+    if (result && result.task_id) {
+        taskResultCache.set(result.task_id, result);
+    }
+
     resultView.classList.remove('hidden');
 
     if (result.compile_ok) {
@@ -251,78 +314,65 @@ function showResult(result) {
         codeEditor.value = result.tikz_code || '';
         resultImg.src = `/api/tasks/${result.task_id}/preview?t=${Date.now()}`;
     }
+
+    // 如果有上一轮选中的结果且不是同一个 task，展示对比
+    if (selectedTaskId && selectedTaskId !== result.task_id) {
+        showComparison(selectedTaskId, result.task_id);
+    } else {
+        comparisonCard.classList.add('hidden');
+    }
+    updateButtonLabel();
 }
 
-// ── Direct Compile (no AI) ─────────────────────
-async function compileOnly() {
-    if (!currentTaskId) return;
-    const code = codeEditor.value.trim();
-    if (!code) {
-        showToast('代码为空，无法编译');
-        return;
-    }
+// ── Comparison ──────────────────────────────────
+function showComparison(baseTaskId, newTaskId) {
+    const baseResult = taskResultCache.get(baseTaskId);
+    const newResult = taskResultCache.get(newTaskId);
+    if (!baseResult || !newResult) return;
 
-    btnCompileOnly.disabled = true;
-    btnCompileOnly.querySelector('span, svg')?.nextSibling?.textContent
-        ? null
-        : (btnCompileOnly.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> 编译中...');
+    compImgA.src = `/api/tasks/${baseTaskId}/preview?t=${Date.now()}`;
+    compImgB.src = `/api/tasks/${newTaskId}/preview?t=${Date.now()}`;
 
-    try {
-        const form = new URLSearchParams();
-        form.append('task_id', currentTaskId);
-        form.append('code', code);
-        const res = await fetch('/api/compile', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: form.toString()
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            showToast('编译失败: ' + (err.detail?.errors || err.detail || 'Unknown error'));
-        } else {
-            const data = await res.json();
-            resultImg.src = data.preview_url;
-            showToast('编译成功！预览已更新');
+    const baseScore = (baseResult.critic_final_score || baseResult.critic_first_score || 0).toFixed(1);
+    const newScore = (newResult.critic_final_score || newResult.critic_first_score || 0).toFixed(1);
+    compScoreA.textContent = `评分: ${baseScore} / 5.0`;
+    compScoreB.textContent = `评分: ${newScore} / 5.0`;
+
+    btnSelectA.onclick = () => selectVersion(baseTaskId);
+    btnSelectB.onclick = () => selectVersion(newTaskId);
+
+    comparisonCard.classList.remove('hidden');
+    comparisonCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function selectVersion(taskId) {
+    selectedTaskId = taskId;
+    currentTaskId = taskId;
+    comparisonCard.classList.add('hidden');
+
+    // 更新 UI 为选中的版本
+    const result = taskResultCache.get(taskId);
+    if (result) {
+        showResult(result);
+        showToast('已保留选中的版本');
+        updateButtonLabel();
+    } else {
+        // 从 API 重新加载
+        try {
+            const res = await fetch(`/api/tasks/${taskId}`);
+            const task = await res.json();
+            if (task.result) {
+                taskResultCache.set(taskId, task.result);
+                showResult(task.result);
+                showToast('已保留选中的版本');
+                updateButtonLabel();
+            }
+        } catch {
+            showToast('加载选中版本失败');
         }
-    } catch (e) {
-        showToast('编译请求失败: ' + e.message);
-    } finally {
-        btnCompileOnly.disabled = false;
-        btnCompileOnly.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> 直接编译修改后的代码';
     }
 }
 
-// ── Regeneration (with AI) ──────────────────────
-async function startRegeneration() {
-    if (!currentTaskId || !currentImageFile) return;
-
-    const promptVal = customPrompt.value.trim();
-    if (!promptVal) {
-        showToast('请在左侧「自定义描述」中输入修改后的描述，再点击重新生成');
-        customPrompt.focus();
-        return;
-    }
-
-    setGenerating(true);
-    resetProgress();
-    progressArea.classList.remove('hidden');
-    emptyState.classList.add('hidden');
-    resultView.classList.add('hidden');
-
-    const form = new FormData();
-    form.append('file', currentImageFile);
-    form.append('custom_prompt', promptVal);
-
-    try {
-        const res = await fetch('/api/generate', { method: 'POST', body: form });
-        const { task_id } = await res.json();
-        currentTaskId = task_id;
-        connectSSE(task_id);
-    } catch (e) {
-        showToast('重新生成失败: ' + e.message);
-        setGenerating(false);
-    }
-}
 
 // ── Downloads ───────────────────────────────────
 function downloadFile(fmt) {
@@ -393,7 +443,10 @@ async function restoreTask(taskId) {
             return;
         }
         currentTaskId = taskId;
+        selectedTaskId = taskId;
+        taskResultCache.set(taskId, task.result);
         showResult(task.result);
+        updateButtonLabel();
         emptyState.classList.add('hidden');
         historyPanel.classList.add('hidden');
     } catch {
