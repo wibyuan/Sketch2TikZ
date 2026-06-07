@@ -125,25 +125,26 @@ python -m train.dev_loop --difficulty easy
 python -m train._ask_ai
 ```
 
-| Flag | Effect |
-|------|--------|
-| `--difficulty {easy,medium,difficult,chart_plot,math_formula,math_geometry,pure_drawing}` | Test set (default: easy) |
-| `--num-samples N` | Samples to test (default: 10, max 50) |
-| `--skip-judge` | Compile-only mode, skip vision judge |
-| `--resume` | Resume from last completed sample |
-| `--start-from N` | Skip samples before index N |
+| Flag                                                                                        | Effect                                |
+| ------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `--difficulty {easy,medium,difficult,chart_plot,math_formula,math_geometry,pure_drawing}` | Test set (default: easy)              |
+| `--num-samples N`                                                                         | Samples to test (default: 10, max 50) |
+| `--skip-judge`                                                                            | Compile-only mode, skip vision judge  |
+| `--resume`                                                                                | Resume from last completed sample     |
+| `--start-from N`                                                                          | Skip samples before index N           |
+
 ## Platforms
 
 Multi-platform architecture with a configurable primary endpoint. Additional providers serve as fallback chain.
 
-| Priority | Vision | Code |
-|----------|--------|------|
-| 1 | default_choice (configurable) | default_choice (configurable) |
-| 2 | ModelScope (Qwen3-VL-235B) | ModelScope (Qwen3-Coder-480B) |
-| 3 | ZhipuAI (glm-4v-flash) | NVIDIA (qwen3-coder-480b) |
-| 4 | NVIDIA (mistral-large-3) | ZhipuAI (glm-4.7-flash) |
-| 5 | — | OpenRouter (nemotron-3-super-120b) |
-| 6 | — | SiliconFlow (Qwen3-8B) |
+| Priority | Vision                        | Code                               |
+| -------- | ----------------------------- | ---------------------------------- |
+| 1        | default_choice (configurable) | default_choice (configurable)      |
+| 2        | ModelScope (Qwen3-VL-235B)    | ModelScope (Qwen3-Coder-480B)      |
+| 3        | ZhipuAI (glm-4v-flash)        | NVIDIA (qwen3-coder-480b)          |
+| 4        | NVIDIA (mistral-large-3)      | ZhipuAI (glm-4.7-flash)            |
+| 5        | —                            | OpenRouter (nemotron-3-super-120b) |
+| 6        | —                            | SiliconFlow (Qwen3-8B)             |
 
 Platforms support comma-separated keys in `.env` for automatic quota rotation. Empty content from the primary platform triggers automatic retry before fallback.
 

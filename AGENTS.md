@@ -46,6 +46,17 @@ python -m train.dev_loop --difficulty medium --samples 5 --review
 - `report.md` 里的 `root_cause` 是 Vision 问题还是 Code 问题？
 - `vision_prompt_fix` 和 `code_system_fix` 是否具体、可粘贴？
 
+**新增：代码结构审查（train 数据专用）**
+
+Train 数据包含 ground-truth TikZ 代码。除视觉对比外，还应做**纯代码层面的结构审查**——检查生成代码与 GT 在 TikZ 原语、坐标、样式上是否一致。这可以发现视觉对比漏掉的"结构性 hack"（如画得对但用了错误 primitive）。
+
+```bash
+# 在 train 数据上同时跑视觉 critic + 代码结构审查
+python -m train.review_test --train --difficulty easy --num-samples 5
+```
+
+**重要边界**：代码审查是**诊断工具**，不是给模型喂答案。`test/` 数据仍然无 GT 代码，最终评测完全密封。
+
 ### Step 2：应用建议并修改 Prompt
 
 根据 `report.md` 的 **Recommended Prompt Changes**，编辑 `train/prompts.py`：

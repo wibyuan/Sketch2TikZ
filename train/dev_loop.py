@@ -24,7 +24,7 @@ load_dotenv(override=True)
 from train.pipeline import generate as pipeline_generate
 from train.pipeline import _internal_critic
 from train.askai import review as ai_review
-from train.prompts import VISION_PROMPT, CODE_SYSTEM
+from train.prompts import load_prompts
 
 
 def safe_print(*a, **kw):
@@ -68,10 +68,11 @@ def run_evaluation(
     os.makedirs(out_dir, exist_ok=True)
 
     # Save current prompts for reproducibility
+    prompts = load_prompts(difficulty)
     with open(os.path.join(out_dir, "prompts_snapshot.json"), "w", encoding="utf-8") as f:
         json.dump({
-            "vision_prompt": VISION_PROMPT,
-            "code_system": CODE_SYSTEM,
+            "vision_prompt": prompts["vision_prompt"],
+            "code_system": prompts["code_system"],
             "timestamp": datetime.now().isoformat(),
         }, f, indent=2, ensure_ascii=False)
 

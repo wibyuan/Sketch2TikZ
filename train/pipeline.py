@@ -104,7 +104,17 @@ CRITIC_PROMPT = (
     '"diagnosis": "<one sentence describing the main difference>"}'
 )
 
-# ── Platform priority (imported from llm_caller) ──────
+# ── Prompt getters (used by test/runner.py) ───────────
+
+def get_vision_prompt(difficulty: str = "easy") -> str:
+    """Return the vision prompt for the given difficulty."""
+    return VISION_PROMPT
+
+
+def get_code_system(difficulty: str = "easy") -> str:
+    """Return the code system prompt for the given difficulty."""
+    return CODE_SYSTEM
+
 
 # ── Helpers ──────────────────────────────────────────
 def _fix(code: str) -> str:
@@ -210,7 +220,7 @@ def _internal_critic(original_path: str, pdf_path: str, output_dir: str) -> dict
 
 
 # ── Main pipeline ────────────────────────────────────
-def generate(image_path: str, index: int, output_dir: str = "output") -> SampleResult:
+def generate(image_path: str, index: int, output_dir: str = "output", difficulty: str = "easy") -> SampleResult:
     t_start = time.time()
     os.makedirs(output_dir, exist_ok=True)
 
